@@ -681,6 +681,10 @@ jobs:
           cp /build/qemu/pc-bios/efi-vmxnet3.rom /opt/incus/share/qemu/
 
       - name: Build Secure Boot firmware
+        # The vars generator boots the built OVMF under QEMU/pexpect with no
+        # expect() timeouts — if the firmware doesn't boot it hangs forever.
+        # Cap the step and run with --debug so the serial output is in the log.
+        timeout-minutes: 20
         run: |
           REPO="${PWD}"
 
@@ -692,7 +696,7 @@ jobs:
           fi
 
           cd "${REPO}/edk2-vars-generator"
-          ./edk2-vars-generator -f "${FIRMWARE}" \
+          ./edk2-vars-generator -f "${FIRMWARE}" --debug \
             -e /build/edk2/Build/*/*/*/EnrollDefaultKeys.efi \
             -s /build/edk2/Build/*/*/*/Shell.efi \
             -c "/opt/incus/share/qemu/OVMF_CODE.4MB.fd" \
