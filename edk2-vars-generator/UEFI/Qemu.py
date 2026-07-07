@@ -75,11 +75,15 @@ class QemuCommand:
         QemuEfiMachine.LOONGARCH64: [
             'qemu-system-loongarch64',
         ] + LoongArch_Common_Params,
+        # Better Stack: prefer KVM (present on GitHub-hosted runners) and use
+        # '-cpu max' so the TCG fallback also handles firmware compiled with
+        # newer-GCC instruction selection. The default qemu64 TCG model #UDs on
+        # AVX2-era instructions that ubuntu-26.04's GCC emits into OVMF.
         QemuEfiMachine.OVMF_PC: [
-            'qemu-system-x86_64', '-machine', 'pc,accel=tcg',
+            'qemu-system-x86_64', '-machine', 'pc,accel=kvm:tcg', '-cpu', 'max',
         ] + Ovmf_Common_Params,
         QemuEfiMachine.OVMF_Q35: [
-            'qemu-system-x86_64', '-machine', 'q35,accel=tcg',
+            'qemu-system-x86_64', '-machine', 'q35,accel=kvm:tcg', '-cpu', 'max',
         ] + Ovmf_Common_Params,
         QemuEfiMachine.OVMF32_PC: [
             'qemu-system-i386', '-machine', 'pc,accel=tcg',
