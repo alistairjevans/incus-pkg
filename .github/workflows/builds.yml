@@ -64,8 +64,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Better Stack: GitHub-hosted runners have ~25GB less free disk than the
-      # build needs; drop the big preinstalled toolchains we don't use.
+      # The GitHub-hosted runner images ship big toolchains we don't use;
+      # drop them to free ~25GB of disk for the build.
       - name: Free disk space
         run: |
           sudo rm -rf \
@@ -162,8 +162,9 @@ jobs:
 
           sudo apt-get install --no-install-recommends --yes systemd-dev || true
 
-          # Better Stack: hosted runners default PIPX_BIN_DIR to /opt/pipx_bin,
-          # which isn't on this workflow's PATH — force the self-hosted layout.
+          # GitHub-hosted runner images preset PIPX_BIN_DIR=/opt/pipx_bin, which is
+          # not on this workflow's hardcoded PATH — install meson into
+          # /home/runner/.local/bin (which IS on the PATH) instead.
           PIPX_HOME=/home/runner/.local/pipx PIPX_BIN_DIR=/home/runner/.local/bin pipx install meson
 
       - name: Install Go
