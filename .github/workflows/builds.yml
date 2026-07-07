@@ -162,7 +162,9 @@ jobs:
 
           sudo apt-get install --no-install-recommends --yes systemd-dev || true
 
-          pipx install meson
+          # Better Stack: hosted runners default PIPX_BIN_DIR to /opt/pipx_bin,
+          # which isn't on this workflow's PATH — force the self-hosted layout.
+          PIPX_HOME=/home/runner/.local/pipx PIPX_BIN_DIR=/home/runner/.local/bin pipx install meson
 
       - name: Install Go
         run: |
