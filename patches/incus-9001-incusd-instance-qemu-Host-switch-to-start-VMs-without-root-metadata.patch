@@ -1,0 +1,72 @@
+From f5dc09eb5c565bc757b93d55d538254072c73f94 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 17 Nov 2026 15:30:16 +0000
+Subject: [PATCH] incusd/instance/qemu: Host switch to start VMs without the
+ root metadata image
+
+Better Stack build. When /etc/incus/betterstack-no-root-metadata exists, a
+VM on local storage gets its raw root volume, as before Incus 7. The qcow2
+metadata image only holds persistent dirty bitmaps, and nothing creates
+bitmaps on our fleet. Its discard path holds the image lock for the whole
+guest discard and sends one 64 KiB discard per cluster to the data file, so
+guest writes wait about 100 ms for each 128 MiB discard.
+
+A metadata image left by an earlier start is removed. Its L2 table can mark
+clusters as zero that the guest wrote later through the raw path, and a start
+that reused it would read zeros there. Without it, a later stock start makes
+a fresh image that maps every cluster to the raw volume.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../server/instance/drivers/driver_qemu.go    | 28 +++++++++++++++++--
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/internal/server/instance/drivers/driver_qemu.go b/internal/server/instance/drivers/driver_qemu.go
+index 136e74deeb..ae95398c28 100644
+--- a/internal/server/instance/drivers/driver_qemu.go
++++ b/internal/server/instance/drivers/driver_qemu.go
+@@ -5257,6 +5257,12 @@ func (d *qemu) addFileDescriptor(fdFiles *[]*os.File, file *os.File) int {
+ 	return 2 + len(*fdFiles) // Use 2+fdFiles count, as first user file descriptor is 3.
+ }
+ 
++// qemuNoRootMetadataFlag is a host-level switch (Better Stack build). When the
++// file exists, a VM on local storage starts with its raw root volume and no
++// qcow2 metadata image. The metadata image only holds persistent dirty bitmaps.
++// Its qcow2 layer serializes guest writes behind discards.
++const qemuNoRootMetadataFlag = "/etc/incus/betterstack-no-root-metadata"
++
+ // ImageMetadataDir returns the metadata image directory for the given instance path.
+ func ImageMetadataDir(instancePath string) string {
+ 	return filepath.Join(instancePath, "image_metadata")
+@@ -5566,9 +5572,25 @@ func (d *qemu) addRootDriveConfig(qemuDev map[string]any, mountInfo *storagePool
+ 		return nil, errors.New("No root disk path available from mount")
+ 	}
+ 
+-	devPath, dataFilePath, err := d.ensureMetadataImage(mountInfo.DiskPath, rootDriveConf.DevName)
+-	if err != nil {
+-		return nil, err
++	var devPath, dataFilePath string
++	var err error
++	if !d.storagePool.Driver().Info().Remote && util.PathExists(qemuNoRootMetadataFlag) {
++		// Better Stack: give QEMU the raw root volume, without the qcow2
++		// metadata image. Remove a metadata image left by an earlier start.
++		// Its L2 table can mark clusters as zero that the guest wrote later
++		// through the raw path. A start that reused it would read zeros there.
++		err = os.Remove(d.imageMetadataPath(rootDriveConf.DevName))
++		if err != nil && !errors.Is(err, fs.ErrNotExist) {
++			return nil, fmt.Errorf("Failed removing metadata image of root disk: %w", err)
++		}
++
++		d.logger.Info("Using the raw root disk without a metadata image", logger.Ctx{"flag": qemuNoRootMetadataFlag})
++		devPath = mountInfo.DiskPath
++	} else {
++		devPath, dataFilePath, err = d.ensureMetadataImage(mountInfo.DiskPath, rootDriveConf.DevName)
++		if err != nil {
++			return nil, err
++		}
+ 	}
+ 
+ 	// Generate a new device config with the root device path expanded.
+-- 
+2.47.0
+

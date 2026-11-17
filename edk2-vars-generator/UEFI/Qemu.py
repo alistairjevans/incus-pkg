@@ -76,10 +76,10 @@ class QemuCommand:
             'qemu-system-loongarch64',
         ] + LoongArch_Common_Params,
         QemuEfiMachine.OVMF_PC: [
-            'qemu-system-x86_64', '-machine', 'pc,accel=tcg',
+            'qemu-system-x86_64', '-machine', 'pc,accel=kvm:tcg', '-cpu', 'max',
         ] + Ovmf_Common_Params,
         QemuEfiMachine.OVMF_Q35: [
-            'qemu-system-x86_64', '-machine', 'q35,accel=tcg',
+            'qemu-system-x86_64', '-machine', 'q35,accel=kvm:tcg', '-cpu', 'max',
         ] + Ovmf_Common_Params,
         QemuEfiMachine.OVMF32_PC: [
             'qemu-system-i386', '-machine', 'pc,accel=tcg',

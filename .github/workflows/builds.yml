@@ -1,6 +1,7 @@
 name: Builds
 on:
   push:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,20 +16,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Better Stack: only the OS/arch our hypervisors run (Ubuntu 26.04,
+        # amd64), on GitHub-hosted runners instead of Zabbly's self-hosted ones.
         os:
-          - ubuntu-22.04
-          - ubuntu-24.04
           - ubuntu-26.04
-          - debian-12
-          - debian-13
         arch:
           - amd64
-          - arm64
-    runs-on:
-      - self-hosted
-      - zabbly-incus-build
-      - arch-${{ matrix.arch }}
-      - image-${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
 
     env:
       OS_ARCH: ${{ matrix.arch }}
@@ -69,6 +63,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # Better Stack: GitHub-hosted runners have ~25GB less free disk than the
+      # build needs; drop the big preinstalled toolchains we don't use.
+      - name: Free disk space
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache
+          df -h /
 
       - name: Configure git
         run: |
@@ -164,7 +170,9 @@ jobs:
 
           sudo apt-get install --no-install-recommends --yes systemd-dev || true
 
-          pipx install meson
+          # Better Stack: hosted runners default PIPX_BIN_DIR to /opt/pipx_bin,
+          # which isn't on this workflow's PATH; force the self-hosted layout.
+          PIPX_HOME=/home/runner/.local/pipx PIPX_BIN_DIR=/home/runner/.local/bin pipx install meson
 
       - name: Install Go
         run: |
@@ -354,6 +362,9 @@ jobs:
           git am "${REPO}/patches/incus-0003-incusd-instance-qemu-Confine-NBD-migration-sockets-t.patch"
           git cherry-pick dd00e2b2e929bd03c190445e7d991e1ffd03788f  # incusd: Reject null snapshot entries on backup import
           git cherry-pick b6c832ba41e0eb92442e0c7491bb2c329134f2b2  # incusd/operations: Keep websocket secrets out of events and queries
+
+          # Better Stack: host switch to start VMs without the qcow2 root metadata image.
+          git am "${REPO}/patches/incus-9001-incusd-instance-qemu-Host-switch-to-start-VMs-without-root-metadata.patch"
 
           go build -o "/opt/incus/bin/fuidshift" github.com/lxc/incus/v7/cmd/fuidshift
           go build -o "/opt/incus/bin/incus" github.com/lxc/incus/v7/cmd/incus
@@ -739,8 +750,17 @@ jobs:
           cp /build/qemu/pc-bios/efi-vmxnet3.rom /opt/incus/share/qemu/
 
       - name: Build Secure Boot firmware
+        # Better Stack: the vars generator has no expect() timeouts; cap the
+        # step and log the serial output with --debug.
+        timeout-minutes: 20
         run: |
           REPO="${PWD}"
+
+          # Better Stack: let the runner user use /dev/kvm so the enrollment
+          # VM runs under KVM (the generator falls back to TCG).
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules || true
+          sudo udevadm trigger --name-match=kvm || true
 
           cd /build/edk2
 
@@ -750,7 +770,7 @@ jobs:
           fi
 
           cd "${REPO}/edk2-vars-generator"
-          ./edk2-vars-generator -f "${FIRMWARE}" \
+          ./edk2-vars-generator -f "${FIRMWARE}" --debug \
             -e /build/edk2/Build/*/*/*/EnrollDefaultKeys.efi \
             -s /build/edk2/Build/*/*/*/Shell.efi \
             -c "/opt/incus/share/qemu/OVMF_CODE.4MB.fd" \
@@ -881,7 +901,8 @@ jobs:
               -e "/^  LIBVIRGL,$/d"
           fi
 
-          dch --package incus --create -D ${CODENAME} -M -m "Automated Incus LTS build" -v 1:$(echo ${INCUS_TAG} | sed -e "s/v//" -e "s/.0$//")-$(echo ${PKGOS} | sed "s/-//g")-$(date -u +%Y%m%d%H%M) --force-distribution
+          # Better Stack: '+bs2' marks our fork build (identifiable in dpkg -l and heartbeats).
+          dch --package incus --create -D ${CODENAME} -M -m "Better Stack Incus LTS build (Zabbly 202610301448 + root metadata switch)" -v 1:$(echo ${INCUS_TAG} | sed -e "s/v//" -e "s/.0$//")-$(echo ${PKGOS} | sed "s/-//g")-$(date -u +%Y%m%d%H%M)+bs2 --force-distribution
           dpkg-buildpackage -b
 
           cd ..
